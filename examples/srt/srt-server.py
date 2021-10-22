@@ -7,6 +7,8 @@ import attr
 
 HOST = 'localhost'
 RECV_BUF_SIZE = 1500  # Corresponds to Ethernet MTU
+SRT_PACKET_HEADER_SIZE_BYTES = 16
+HANDSHAKE_PAYLOAD_SIZE_BYTES = 48
 
 
 class HandshakeType(Enum):
@@ -16,11 +18,24 @@ class HandshakeType(Enum):
 @attr.s
 class SrtHandshake(object):
     """ SRT Handshake Packet """
-    # TODO: Validator for the first two bytes
-    header: bytes = attr.ib()
-    payload: bytes = attr.ib()
 
-    timestamp: bytes = attr.ib()
+    header: bytearray = attr.ib(converter=bytearray)
+    @header.validator
+    def _check_header(self, attribute, value):
+        if not value.startswith(b'\x80\x00'):
+            raise ValueError("SRT packet doesn't correspond to a handshake packet")
+
+        if len(value) != SRT_PACKET_HEADER_SIZE_BYTES:
+            raise ValueError(f"Header size must be {SRT_PACKET_HEADER_SIZE_BYTES} bytes")
+
+    payload: bytearray = attr.ib(converter=bytearray)
+
+    @classmethod
+    def from_udp_payload(cls, data):
+        """ From UDP packet payload. """
+        return cls(data[:SRT_PACKET_HEADER_SIZE_BYTES], data[SRT_PACKET_HEADER_SIZE_BYTES:])
+
+    timestamp: int = attr.ib()
     @timestamp.default
     def _extract_timestamp(self):
         return int.from_bytes(self.header[8:12], "big")
@@ -41,10 +56,18 @@ class SrtHandshake(object):
     def _extract_type(self):
         return HandshakeType(self.payload[20:24])
 
-    srt_socket_id: bytes = attr.ib()
+    srt_socket_id: bytearray = attr.ib(converter=bytearray)
     @srt_socket_id.default
     def _extract_srt_socket_id(self):
         return self.payload[24:28]
+
+    def update_version(self, value: int):
+        self.version = value
+        self.payload[:4] = value.to_bytes(4, byteorder="big")
+
+    def get_udp_payload(self):
+        return self.header + self.payload
+
 
 
 def srt_server(port): 
@@ -70,13 +93,54 @@ def srt_server(port):
             if data.startswith(b'\x80\x00'):
                 # print(f'This is an SRT handshake. Timestamp: {data[8:12]} ~ {int.from_bytes(data[8:12], "big")} \n')
 
-                hs = SrtHandshake(data[:16], data[16:])
+                hs = SrtHandshake.from_udp_payload(data)
                 print(hs)
+
+                # TODO:
+                # hs.type == HandshakeType.INDUCTION
+                # Destination Socket ID = 0
+                # Version = 4
 
                 if hs.type == HandshakeType.INDUCTION:
                     print("Induction handshake, break")
-                    
+
                     # TODO: reply to handshake
+                    # Extension Field = 0x4A17
+                    # Version = 5
+                    # hs.type == HandshakeType.INDUCTION
+                    # SRT Socket ID: Socket ID of the Listener
+                    # SYN Cookie: a cookie that is crafted based on host, port and
+                    # current time with 1 minute accuracy to avoid SYN flooding attack
+                    empty_header = bytearray(SRT_PACKET_HEADER_SIZE_BYTES)
+                    empty_payload = bytearray(HANDSHAKE_PAYLOAD_SIZE_BYTES)
+
+                    print(empty_header)
+                    print(empty_payload)
+
+                    empty_header[:2] = b'\x80\x00'
+
+                    print(empty_header)
+                    break
+                    print(empty_payload)
+
+                    # hs_reply = SrtHandshake(, )
+                    print(hs_reply)
+                    break
+
+                    hs_reply = hs
+                    hs_reply.update_version(5)
+
+
+                    print(hs_reply.get_udp_payload())
+                    print(hs_reply)
+                    # value = 5
+                    # print(value.to_bytes(4, byteorder="big"))
+
+                    print(len(hs.payload))
+                    break
+
+                    
+                    
 
 
 if __name__ == '__main__':
